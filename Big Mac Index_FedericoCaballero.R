@@ -1,0 +1,686 @@
+# title: "The Big Mac Index: a tool for investors"
+# author: "Federico J. Caballero Ferrari"
+# date: "2023-01-16"
+
+#Hide all warning messages
+knitr::opts_chunk$set(echo = TRUE)
+
+# Install packages (if it is required)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(rpart)) install.packages("rpart", repos = "http://cran.us.r-project.org")
+if(!require(Rborist)) install.packages("Rborist", repos = "http://cran.us.r-project.org")
+if(!require(gbm)) install.packages("gbm")
+if(!require(gridExtra)) install.packages("gridExtra")
+if(!require(rio)) install.packages("rio")
+if(!require(randomForest)) install.packages("randomForest")
+
+# Load the packages
+library(tidyverse)
+library(caret)
+library(data.table)
+library(rpart)
+library(Rborist)
+library(gbm)
+library(gridExtra)
+library(ggplot2)
+library(readr)
+
+# 1. Introduction
+
+# This is the last project of the Professional Certificate in Data Science Program, organized by Harvard University in the platform EDX. There are no restrictions about the dataset selected, except for the one already used in the MovieLens project.
+
+# Regarding the methods, at least two different algorithms must be used, with at least one being more advanced than linear or logistic regression for prediction problems.
+
+# The dataset selected contains 1,631 observations of 58 countries in the 01/04/2000 - 01/07/2022 period from 2 different datasets, uploaded by *Paul Mooney.*[^1] The original creator of the dataset is The Economist, using external sources such as the International Monetary Fund (IMF), Reuters and McDonald's.
+
+# This dataset contains information about several countries such as local currency exchange prices, currency overvaluation and real GDP per capita. However, the most important data is the price of a Big Mac in each country, which is used as an indicator of internal consumer prices. The distribution of each attribute of the data will be shown and a data cleaning analysis will be performed in order to guarantee the most possible accurate results.
+
+# The Big Mac Index is frequently used in economics as a way to measure and compare the prices of consumer goods between two or more countries. For this purpose, "baskets" of products have been traditionally used instead; however, the fact that those baskets change from one country to another make this comparison very difficult. On the other hand, Big Macs always have the same composition in terms of ingredients and proportions, regardless of the country. The fact that these ingredients are varied and reflect food prices quite accurately (including bread, meat and vegetables) make the Big Mac index a very useful tool for economists.
+
+# At first sight, one would think that if ingredients and proportions are the same, the price of Big Macs should not change from one country to another when currency exchange rates are considered. However this is rarely the case, which means that many currencies have an actual purchasing power which is higher than the one shown by exchange prices. The Big Mac index shows, in fact, this gap between prices and real purchasing power. It can be expressed in many currencies, but in this project we will be using USD dollars. Our goal will be to use the Big Mac Index to predict when a currency is undervalued (and therefore, a good investment opportunity) in foreign exchange markets.
+
+# With that goal in mind, we will find the machine learning method that predicts those results most accurately. In order to train the different models, we will be splitting the data into two groups: train data and test data. The accuracy  of each method will then be computed comparing the real test data with the predicted test data through RMSE and R squared. The machine learning methods utilized in the project are GLM, KNN, RF and CART. Finally, we will be analyzing the results of the two most accurate methods.
+
+# [^1]: paultimothymooney (23/10/2022). The Economist's Big Mac Index. Retrieved from <https://www.kaggle.com/datasets/paultimothymooney/the-economists-big-mac-index/download?datasetVersionNumber=32>
+
+# 2. Methods / Analysis
+
+# The colors chosen for this report are cadet blue and steel blue (and its variations), instead of the default colors.
+
+# Selected colors (to be used instead of the default ones)
+colorsOfTheProject1 <- c("steelblue3")
+colorsOfTheProject2 <- c("cadetblue3", "steelblue3")
+
+# 2.1 Data structure
+
+# A description of the data included in each one of the 19 columns from the dataset is provided below: 
+  
+#  *   **date**: date of the observation 
+#  *   **iso_a3**: ISO country code 
+#  *   **currency_code**: international code for the local currency 
+#  *   **name**: name of the country 
+#  *   **local_price**: price of a Big Mac in local currency units 
+#  *   **dollar_ex**: exchange rate (number of local currency units per dollar) 
+#  *   **dollar_price**: price of a Big Mac in USD dollars (according to the exchange rate) 
+#  *   **USD_raw**: Big Mac raw index, relative to USD dollars 
+#  *   **EUR_raw**: Big Mac raw index, relative to EUR euros 
+#  *   **GBP_raw**: Big Mac raw index, relative to GBP pounds 
+#  *   **JPY_raw**: Big Mac raw index, relative to JPY yen 
+#  *   **CNY_raw**: Big Mac raw index, relative to CNY yuan 
+#  *   **GDP_bigmac**: Gross Domestic Product per person in USD dollars, adjusted to Big Mac prices 
+#  *   **adj_price**: price of a Big Mac, adjusted to nominal GDP per person in USD dollars 
+#  *   **USD_adjusted**: Big Mac adjusted index, relative to USD dollars 
+#  *   **EUR_adjusted**: Big Mac adjusted index, relative to EUR euros 
+#  *   **GBP_adjusted**: Big Mac adjusted index, relative to GBP pounds 
+#  *   **JPY_adjusted**: Big Mac adjusted index, relative to JPY yen 
+#  *   **CNY_adjusted**: Big Mac adjusted index, relative to CNY yuan
+
+# Note: the Big Mac index variables show how much a local currency is over or undervalued against the reference currency (in this project, USD, EUR, GBP, JPY or CNY). For example, in April 2000 the exchange rate between USD dollars and ARS (Argentinian pesos) was 1 = 1. However, Big Macs were cheaper in the US (2,24 USD) than in Argentina (2,50 ARS). This means that, in terms of purchasing power, Argentinian pesos were overvalued against US dollars. For this reason, the raw Big Mac index relative to USD dollars for Argentina was 0.11607. When doing the same calculation with adjusted prices, the overvaluation shown is even higher (0.39117). In both cases, we could say that for a US investor, it would not have been profitable to invest in ARS pesos then. Instead, when index values are negative, it means that the local currency is undervalued, and hence a good investment opportunity.
+
+# The first step is to load the data. It could be downloaded [**here**](https://github.com/fdcabfer/Big-Mac-Index/blob/main/big-mac-full-index.csv). In the following code, we will be presenting three different ways to download/use the data. By default, the code will only read the data from the online repository, but if the user prefers to download the data, there are the two other ways to do it.
+
+# Loading the data - Different options
+
+# 01. If the user only needs to read the data online:
+big_mac_full_index <- read.csv(
+  "https://raw.githubusercontent.com/fdcabfer/Big-Mac-Index/main/big-mac-full-index.csv")
+
+# 02. If the user prefers to download it in their computer:
+# url <- " https://github.com/fdcabfer/Big-Mac-Index/blob/main/big-mac-full-index.csv "
+# download.file(url, destfile = " big-mac-full-index.csv ")
+# data <- read_csv("big-mac-full-index.csv ")
+
+# 03. If the data is already downloaded (in the active directory):
+# data <- read_csv("big-mac-full-index.csv ")
+
+# In order to achieve a general understanding of the information of all the columns in the dataset, the structure of the data and the first 6 rows of the dataset will be shown:
+
+# Data structure
+str(big_mac_full_index)
+
+# First 6 rows of data
+head(big_mac_full_index)
+
+# Which means that we have a total of 1,631 observations, with data divided into 19 columns.
+
+# 2.2 Data cleaning
+
+# In order not to process data with missing values, it is necessary to observe if there is any NA.
+
+# Find NA values (total)
+is.na(big_mac_full_index) %>% sum()
+
+# As one can observe, there are 1,742 missing values in the dataset. Those missing values can be explained by two main factors: 
+  
+#  *   The euro was not in circulation in the year 2000, which means that there are no values for **EUR_adjusted** in any of the observations made that year 
+#  *   GDP data (**GDP_bigmac**) is not available for some countries, which also impacts in lack of adjusted variables (**adj_price**, **USD_adjusted**, **EUR_adjusted**, **GBP_adjusted**, **JPY_adjusted**, **CNY_adjusted**)
+
+# In the first case, we can observe 272 missing values:
+
+# Find NA values (EUR_adjusted)
+is.na(big_mac_full_index$EUR_adjusted) %>% sum()
+
+# In the case of GDP data, we can observe 245 missing values:
+
+# Find NA values (GDP_bigmac)
+is.na(big_mac_full_index$GDP_bigmac) %>% sum()
+
+# As we have mentioned above it is important to note that, while there are 245 missing values only in the **GDP_bigmac** variable, for those observations there are also missing values in the adjusted variables:
+
+# Find NA values (adjusted variables, other than EUR_adjusted)
+is.na(big_mac_full_index$adj_price) %>% sum()
+is.na(big_mac_full_index$USD_adjusted) %>% sum()
+is.na(big_mac_full_index$GBP_adjusted) %>% sum()
+is.na(big_mac_full_index$JPY_adjusted) %>% sum()
+is.na(big_mac_full_index$CNY_adjusted) %>% sum()
+
+# Adding up the former missing values, we get to the 1,742 we had found originally. We will now remove those observations from our dataset.
+
+# First, we remove all the observations with missing values for the **GDP_bigmac** variable:
+
+# Remove NA values (GDP)
+data <- big_mac_full_index[!is.na(big_mac_full_index$GDP_bigmac),]
+
+# Then, we remove all the observations with missing values for the **EUR_adjusted** variable:
+
+# Remove NA values (EUR)
+data1 <- data[!is.na(data$EUR_adjusted),]
+
+# Once we have performed the data cleaning, we have the following structure:
+
+# Data structure
+str(data1)
+
+# First 6 rows of data
+head(data1)
+
+# Which leaves us with a total of 1,359 observations, with data divided into 19 columns.
+
+# 2.3 Data exploration and visualization
+
+# The first variable to explore is the date when the observations were made, shown in the **date** column:
+
+# Distribution of dates
+d1 <- data1 %>% ggplot(aes(date)) + geom_bar(fill=colorsOfTheProject1) +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1)) +
+  xlab("Date of observation") + ylab("Count") + ggtitle("Number of observations by date")
+d1
+
+# As we can see, there are more observations from recent years than from the first years in the dataset time frame, which means that we will be working with mostly updated data.
+
+# Another feature to take into account is the number of observations per country, in order to check if some countries have more relative weight in the results than others. We will show this by grouping the observations using the **iso_a3** variable (ISO country code) as reference:
+
+# Distribution of countries
+data1 <- data1 %>% mutate(iso_a3 = as.factor(iso_a3))
+data2 <- data1 %>% group_by(iso_a3) %>% summarise(n = n())
+c1 <- data2 %>% ggplot(aes(n)) + geom_bar(fill=colorsOfTheProject1) + 
+  xlab("Number of observations") + ylab("Count") + ggtitle("Number of observations by country")
+c1
+
+# As we can see, the number of observations is not always the same for every country. However, most countries have more than 20 observations for a time frame of 20 years, which means that the dataset contains consistent information across the referred period.
+
+# Now, the next variables to explore are Big Mac prices in USD dollars. In this dataset, there are two variables which represent this value. The first one is **dollar_price**, which shows the nominal price in each country:
+
+# Distribution of nominal prices
+data1$dollar_price_round <- round(data1$dollar_price, digits = 0)
+c2 <- data1 %>% ggplot(aes(dollar_price_round)) + geom_bar(fill=colorsOfTheProject1) + 
+  xlab("Price of a Big Mac (nominal, USD dollars)") + ylab("Count") + 
+  ggtitle("Nominal Big Mac prices")
+c2
+
+# The second one is **adj_price**, which shows the price in each country adjusted to nominal GDP per person:
+
+# Distribution of adjusted prices
+data1$adj_price_round <- round(data1$adj_price, digits = 0)
+c3 <- data1 %>% ggplot(aes(adj_price_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Price of a Big Mac (adjusted, USD dollars)") + ylab("Count") + 
+  ggtitle("Adjusted Big Mac prices")
+c3
+
+# Next, we will explore the **USD_raw** index. It storages the first important feature: \< 0 if the currency is undervalued (an therefore, a good opportunity for investors who operate in USD dollars), 0 if it is neutral and \> 0 if it is overvalued. The next graph represents the **USD_raw** distribution:
+
+# Distribution of the Big Mac Index (raw, USD dollars)
+data1$USD_raw_round <- round(data1$USD_raw, digits = 0)
+c4 <- data1 %>% ggplot(aes(USD_raw_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (raw, USD dollars)") + ylab("Count") + 
+  ggtitle("Distribution of raw USD Big Mac index")
+c4
+
+# As one can observe, most values are close to 0 when rounded. Therefore, in the next section we will take a deeper analysis in order to see how many of them represent over(under)valued currencies, which means positive (negative) values.
+
+# However, there is another main feature which we will consider in this project: **USD_adjusted**, which is the Big Mac index calculated on the adjusted price when per-capita GDP is considered, relative to USD dollars. Once again, the distribution must be read as: \< 0 if the currency is undervalued (an therefore, a good opportunity for investors who operate in USD dollars), 0 if it is neutral and \> 0 if it is overvalued. The next graph represents the **USD_adjusted** distribution:
+  
+# Distribution of the Big Mac Index (adjusted, USD dollars)
+data1$USD_adjusted_round <- round(data1$USD_adjusted, digits = 0)
+c5 <- data1 %>% ggplot(aes(USD_adjusted_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (adjusted, USD dollars)") + ylab("Count") + 
+  ggtitle("Distribution of adjusted USD Big Mac index")
+c5
+
+# Similar Big Mac indexes relative to other currencies (EUR, JPY, CNY) are also presented:
+
+# Distribution of the Big Mac Index (other currencies)
+data1$EUR_raw_round <- round(data1$EUR_raw, digits = 0)
+data1$EUR_adjusted_round <- round(data1$EUR_adjusted, digits = 0)
+data1$GBP_raw_round <- round(data1$GBP_raw, digits = 0)
+data1$GBP_adjusted_round <- round(data1$GBP_adjusted, digits = 0)
+data1$JPY_raw_round <- round(data1$JPY_raw, digits = 0)
+data1$JPY_adjusted_round <- round(data1$JPY_adjusted, digits = 0)
+data1$CNY_raw_round <- round(data1$CNY_raw, digits = 0)
+data1$CNY_adjusted_round <- round(data1$CNY_adjusted, digits = 0)
+c6 <- data1 %>% ggplot(aes(EUR_raw_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (raw, EUR)") + ylab("Count")
+c7 <- data1 %>% ggplot(aes(EUR_adjusted_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (adjusted, EUR)") + ylab("Count")
+c8 <- data1 %>% ggplot(aes(GBP_raw_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (raw, GBP)") + ylab("Count")
+c9 <- data1 %>% ggplot(aes(GBP_adjusted_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (adjusted, GBP)") + ylab("Count")
+c10 <- data1 %>% ggplot(aes(JPY_raw_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (raw, JPY)") + ylab("Count")
+c11 <- data1 %>% ggplot(aes(JPY_adjusted_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (adjusted, JPY)") + ylab("Count")
+c12 <- data1 %>% ggplot(aes(CNY_raw_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (raw, CNY)") + ylab("Count")
+c13 <- data1 %>% ggplot(aes(CNY_adjusted_round)) + geom_bar(fill=colorsOfTheProject1) +
+  xlab("Index (adjusted, CNY)") + ylab("Count")
+grid.arrange(c6, c7, c8, c9, c10, c11, c12, c13, ncol=2)
+
+
+# As we have seen with the variables **USD_raw** and **USD_adjusted**, also for these variables most values are close to 0 when rounded, so we will need further analysis.
+
+# Finally, in order to understand the variety of observations in the dataset, we will explore the distribution of the **GDP_bigmac** feature:
+  
+# Distribution of GDP
+data1 <- data1 %>% 
+  mutate(GDP_per_person = cut(GDP_bigmac, breaks = seq(0, 10^5, by = 10^4),
+                              labels = paste0("[", seq(0, 9*10^4, by = 10^4), ", ", seq(10^4, 10^5, by = 10^4), ")")))
+c14 <- data1 %>% ggplot(aes(GDP_per_person)) + geom_bar(fill=colorsOfTheProject1) +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1)) +
+  xlab("GDP per person (adjusted, USD dollars)") + ylab("Count") + 
+  ggtitle("Distribution of observations by GDP")
+c14
+
+# As one can observe, most observations represent low-income countries. This can be explained by two main reasons:
+  
+#  *   There are more low-income than high-income countries in the world 
+#  *   Many of the high-income countries in the world are grouped into one (Euro Area) in this dataset
+
+# In any case, the sample has a wide range of incomes, including a significant number of middle-income countries.
+
+# There are other 4 variables which have not been shown in this section. The features **currency_code** and **name** relate to single countries, and therefore the results we would get by grouping them would be the same that we got for **iso_a3**. Regarding the variables **local_price** and **dollar_ex**, they have not been considered since their respective values are shown in local currency units and thus are not comparable to each other.
+
+# Now, for each of the features, a table and a distribution chart will be presented. These graphs will also distinguish if for each category, the local currency is undervalued or not compared to adjusted USD dollars.
+
+# In order to do this, first we will create a discrete variable (**USD_adjusted_discrete**) based on the **USD_adjusted** variable. Then we will turn it into a factor (for this, we will be creating an extra variable, **USD_adjusted_discrete_factor**):
+
+# Create discrete USD variable, turn into factor
+data1$USD_adjusted_discrete <- ifelse(data1$USD_adjusted < 0,1,0)
+data1$USD_adjusted_discrete_factor <- as.factor(data1$USD_adjusted_discrete)
+
+# Finally, we will associate the value 1 in the factor to observations where the local currency is undervalued (and therefore, a good investment opportunity) and the value 0 to observations where the local currency is overvalued:
+
+# 1. Nominal price of a Big Mac in USD dollars
+data1 %>% group_by(dollar_price_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(dollar_price, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() +
+  scale_color_manual("Valuation against USD dollars", 
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Price of a Big Mac (nominal, USD dollars)") + ylab("Big Mac index (adjusted, USD dollars)") 
+
+# As we can observe, the higher the nominal price is, the more likely it is for the local currency to be overvalued. However, dispersion is also great, which means high variability in results.
+
+# 2. USD raw index
+data1 %>% group_by(USD_raw_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(USD_raw, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() +
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (raw, USD dollars)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# In this case, the distribution of results seems far more linear, which is logical due to the fact that we are comparing 2 variables which represent the same index (USD dollars, raw and adjusted).
+
+# 3. EUR raw index
+data1 %>% group_by(EUR_raw_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(EUR_raw, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() +
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (raw, EUR euros)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# For the EUR raw index, we see positive correlation with high dispersion.
+
+# 4. GBP raw index
+data1 %>% group_by(GBP_raw_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(GBP_raw, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (raw, GBP pounds)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# As we can see, a similar statement can be made about the GBP raw index.
+
+# 5. JPY raw index
+data1 %>% group_by(JPY_raw_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(JPY_raw, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (raw, JPY yen)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# The variability is even higher for the JPY raw index, even when the positive correlation remains. In fact, as we can see in the distribution table, 2,44 % of observations rounded to 1 show high overvaluation against JPY yen and at least some undervaluation against USD dollars.
+
+# 6. CNY raw index
+data1 %>% group_by(CNY_raw_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(CNY_raw, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (raw, CNY yuan)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# For the CNY raw index, the correlation remains positive and there is less dispersion. However, this correlation is not perfectly linear, and thus we can see that 8,03 % of observations rounded to 1 show high overvaluation against CNY yuan and at least some undervaluation against USD dollars.
+
+# 7. Adjusted GDP per person
+data1 %>% group_by(GDP_per_person) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(GDP_bigmac, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("GDP per person (adjusted, USD dollars)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# As one can observe, there is no clear correlation between adjusted GDP per person and the valuation of the local currency against USD dollars. However, in the few observations we have for the top high-income countries, there is a tendency to undervaluation. High dispersion is also observed.
+
+# 8. Adjusted price of a Big Mac in USD dollars
+data1 %>% group_by(adj_price_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(adj_price, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Price of a Big Mac (adjusted, USD dollars)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# At the beginning of this section we had observed a positive correlation between nominal Big Mac prices in USD dollars and the valuation of the local currency. However, as we can see, that correlation disappears when the Big Mac prices are adjusted instead of nominal (being adjusted to the country's GDP, as we explained in section 2.1).
+
+# 9. EUR adjusted index
+data1 %>% group_by(EUR_adjusted_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(EUR_adjusted, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian()+ 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (adjusted, EUR euros)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# Now, if we observe the EUR adjusted index, we will see positive correlation and far less dispersion than in the raw index.
+
+# 10. GBP adjusted index
+data1 %>% group_by(GBP_adjusted_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(GBP_adjusted, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian()+ 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (adjusted, GBP pounds)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# A similar statement can be made about the GBP adjusted index.
+
+# 11. JPY adjusted index
+data1 %>% group_by(JPY_adjusted_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(JPY_adjusted, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (adjusted, JPY yen)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# However, it is not the case for the JPY adjusted index. As we can see, there is still high variability in results even after correcting the impact of nominal GDP in prices.
+
+# 12. CNY adjusted index
+data1 %>% group_by(CNY_adjusted_round) %>% 
+  summarize(USD_adjusted_discrete = round(mean(USD_adjusted_discrete)*100,2), n=n()) %>% knitr::kable()
+data1 %>% 
+  ggplot(mapping = aes(CNY_adjusted, USD_adjusted, color= USD_adjusted_discrete_factor)) +
+  geom_point() +
+  coord_cartesian() + 
+  scale_color_manual("Valuation against USD dollars",
+                     values=colorsOfTheProject2,labels = c("Overvalued", "Undervalued")) +
+  xlab("Big Mac index (adjusted, CNY yuan)") + ylab("Big Mac index (adjusted, USD dollars)")
+
+# In the case of the CNY adjusted index, we see much less variability than in the raw index. In fact, the distribution seems almost perfectly linear.
+
+# 2.4 Modeling approach
+
+# For modeling purposes, some variables need to be removed for prediction: 
+  
+#  *   Variables with values that are not used for the analysis (**date**, **iso_a3**, **currency_code**, **name**, **local_price**, **dollar_ex**) 
+#  *   Rounded variables (**dollar_price_round**, **adj_price_round**, **USD_raw_round**, **USD_adjusted_round**, **EUR_raw_round**, **EUR_adjusted_round**, **GBP_raw_round**, **GBP_adjusted_round**, **JPY_raw_round**, **JPY_adjusted_round**,  **CNY_raw_round**, **CNY_adjusted_round**, **GDP_per_person**) 
+#  *   Discrete variables or factors (**USD_adjusted_discrete**, **USD_adjusted_discrete_factor**) 
+#  *   Raw variables, which are perfectly correlated to the adjusted ones (**dollar_price**, **USD_raw**, **EUR_raw**, **GBP_raw**, **JPY_raw**, **CNY_raw**). In addition, they might present some bias due to the effect of higher nominal prices (especially for non-traded goods) in richer countries. For this reason, we will be using adjusted variables instead
+
+# The variables we will be using for our prediction models are the following:**GDP_bigmac**, **adj_price**, **USD_adjusted**, **EUR_adjusted**, **GBP_adjusted**, **JPY_adjusted** and **CNY_adjusted**.
+
+# Clean data for modeling
+data3 <- select(data1, -date, -iso_a3, -currency_code, -name, -local_price, 
+                -dollar_ex, -dollar_price_round, -adj_price_round, -USD_raw_round, 
+                -USD_adjusted_round, -EUR_raw_round, -EUR_adjusted_round, -GBP_raw_round, 
+                -GBP_adjusted_round, -JPY_raw_round, -JPY_adjusted_round, -CNY_raw_round, 
+                -CNY_adjusted_round, -GDP_per_person,-USD_adjusted_discrete, 
+                -USD_adjusted_discrete_factor, -dollar_price, -USD_raw, -EUR_raw, 
+                -GBP_raw, -JPY_raw, -CNY_raw)
+
+# Once we have cleaned the data for prediction, we will separate the test and train datasets. The test dataset is a random sample of 30 % of the total observations, while the train dataset contains the remaining 70 %:
+
+# Split data into train and test datasets
+set.seed(1)
+sample <- sample(c(TRUE, FALSE), nrow(data3), replace=TRUE, prob=c(0.7,0.3))
+train  <- data3[sample, ]
+test   <- data3[!sample, ]
+
+# There are multiple machine learning algorithms available. In this project 4 methods are selected. These are the models used:
+  
+#  *   Model 1: GLM
+#  *   Model 2: KNN
+#  *   Model 3: RF
+#  *   Model 4: CART
+
+# 2.4.1 Model 1: GLM
+
+# The *Generalized Linear Model* (**GLM**) generalizes linear regression by allowing the linear model to be related to the response variable and allowing the magnitude of the variance of each measurement to be a function of its predicted value. It unifies various other statistical models, including linear regression, logistic regression, and Poisson regression.
+
+# Predicted results for the GLM model:
+BigMac_ctrl <- trainControl(method="cv", number = 10)
+
+BigMac_glm_trained <- train(USD_adjusted ~ ., 
+                            train, 
+                            method = "glm",
+                            trControl = BigMac_ctrl
+)
+BigMac_glm_predicted <- predict(BigMac_glm_trained, newdata = test )
+
+
+error <- BigMac_glm_predicted - test$USD_adjusted
+
+# Calculating the Residual Mean Squared Error (RMSE):
+rmse_glm <- sqrt(mean(error^2))
+
+# Calculating the R Squared for the GLM model:
+df_glm <- data.frame(
+  y_actual = test$USD_adjusted,
+  y_predicted  = BigMac_glm_predicted)
+
+
+avr_y_actual <- mean(df_glm$y_actual)
+
+# Total sum of squares
+ss_total <- sum((df_glm$y_actual - avr_y_actual)^2)
+
+# Regression sum of squares
+ss_regression <- sum((df_glm$y_predicted - avr_y_actual)^2)
+
+# Residual sum of squares
+ss_residuals <- sum((df_glm$y_actual - df_glm$y_predicted)^2)
+
+# R2 Score
+r2_glm <- 1 - ss_residuals / ss_total
+
+# 2.4.2 Model 2: KNN
+
+# The second algorithm selected is **kNN** (*k-Nearest Neighbors*) which classifies neighbors with similar characteristics and chooses the most common outcome of each of these group neighbors.
+
+# Predicted results for the KNN model:
+BigMac_ctrl <- trainControl(method="cv", number = 10)
+
+BigMac_knn_trained <- train(USD_adjusted ~ ., 
+                            train, 
+                            method = "knn",
+                            trControl = BigMac_ctrl
+)
+BigMac_knn_predicted <- predict(BigMac_knn_trained, newdata = test )
+
+
+error <- BigMac_knn_predicted - test$USD_adjusted
+
+# Calculating the Residual Mean Squared Error (RMSE):
+rmse_knn <- sqrt(mean(error^2))
+
+# Calculating the R Squared for the KNN model:
+df_knn <- data.frame(
+  y_actual = test$USD_adjusted,
+  y_predicted  = BigMac_knn_predicted)
+
+
+avr_y_actual <- mean(df_knn$y_actual)
+
+# Total sum of squares
+ss_total <- sum((df_knn$y_actual - avr_y_actual)^2)
+
+# Regression sum of squares
+ss_regression <- sum((df_knn$y_predicted - avr_y_actual)^2)
+
+# Residual sum of squares
+ss_residuals <- sum((df_knn$y_actual - df_knn$y_predicted)^2)
+
+# R2 Score
+r2_knn <- 1 - ss_residuals / ss_total
+
+# 2.4.3 Model 3: RF
+
+# The third model used is *Random Forest* (**RF**). This method operates by constructing a number of decision trees during training. For classification tasks, the output of the random forest is the class selected by most trees. For regression tasks, the mean or average prediction of the individual trees is returned.
+
+# Predicted results for the RF model:
+BigMac_ctrl <- trainControl(method="cv", number = 10)
+
+BigMac_rf_trained <- train(USD_adjusted ~ ., 
+                           train, 
+                           method = "rf",
+                           trControl = BigMac_ctrl
+)
+BigMac_rf_predicted <- predict(BigMac_rf_trained, newdata = test )
+
+
+error <- BigMac_rf_predicted - test$USD_adjusted
+
+# Calculating the Residual Mean Squared Error (RMSE):
+rmse_rf <- sqrt(mean(error^2))
+
+# Calculating the R Squared for the RF model:
+df_rf <- data.frame(
+  y_actual = test$USD_adjusted,
+  y_predicted  = BigMac_rf_predicted)
+
+
+avr_y_actual <- mean(df_rf$y_actual)
+
+# Total sum of squares
+ss_total <- sum((df_rf$y_actual - avr_y_actual)^2)
+
+# Regression sum of squares
+ss_regression <- sum((df_rf$y_predicted - avr_y_actual)^2)
+
+# Residual sum of squares
+ss_residuals <- sum((df_rf$y_actual - df_rf$y_predicted)^2)
+
+# R2 Score
+r2_rf <- 1 - ss_residuals / ss_total
+
+# 2.4.4 Model 4: CART
+
+# The **CART model** (*Classification and Regression Tree*) is a variation of the decision tree algorithm, used for both regression and classification tasks:
+
+# Predicted results for the CART model:
+BigMac_ctrl <- trainControl(method="cv", number = 10)
+
+BigMac_rpart_trained <- train(USD_adjusted ~ ., 
+                              train, 
+                              method = "rpart",
+                              trControl = BigMac_ctrl
+)
+BigMac_rpart_predicted <- predict(BigMac_rpart_trained, newdata = test )
+
+
+error <- BigMac_rpart_predicted - test$USD_adjusted
+
+# Calculating the Residual Mean Squared Error (RMSE):
+rmse_rpart <- sqrt(mean(error^2))
+
+# Calculating the R Squared for the CART model:
+df_rpart <- data.frame(
+  y_actual = test$USD_adjusted,
+  y_predicted  = BigMac_rpart_predicted)
+
+
+avr_y_actual <- mean(df_rpart$y_actual)
+
+# Total sum of squares
+ss_total <- sum((df_rpart$y_actual - avr_y_actual)^2)
+
+# Regression sum of squares
+ss_regression <- sum((df_rpart$y_predicted - avr_y_actual)^2)
+
+# Residual sum of squares
+ss_residuals <- sum((df_rpart$y_actual - df_rpart$y_predicted)^2)
+
+# R2 Score
+r2_rpart <- 1 - ss_residuals / ss_total
+
+# 3. Results
+
+# We will now present how each of the previous models is able to predict results in terms of accuracy. First, we show the results based on the *Coefficient of Determination* (**R squared**), where higher values mean better accuracy:
+
+# Show accuracy of models: R2
+results <- tibble(method = "rf", Rsquared = r2_rf) %>%
+  bind_rows(tibble(method="glm", Rsquared = r2_glm)) %>%
+  bind_rows(tibble(method="rpart", Rsquared = r2_rpart)) %>%
+  bind_rows(tibble(method="knn", Rsquared = r2_knn))
+results %>% knitr::kable()
+
+# As we can see, the most accurate models are *Random Forest* (**RF**) and the *Generalized Linear Model* (**GLM**).
+
+# For further validation, we will now see the accuracy of our models based on the *Residual Mean Squared Error* (**RMSE**), where lower values mean higher accuracy:
+
+# Show accuracy of models: RMSE
+results <- tibble(method = "rf", RMSE = rmse_rf) %>%
+  bind_rows(tibble(method="glm", RMSE = rmse_glm)) %>%
+  bind_rows(tibble(method="rpart", RMSE = rmse_rpart)) %>%
+  bind_rows(tibble(method="knn", RMSE = rmse_knn))
+results %>% knitr::kable()
+
+# Again, the most accurate models are **RF** and **GLM**.
+
+# Finally, the importance of each variable in our 2 best models is shown. We start with **RF**:
+
+# Importance of variables: Random Forest (RF)
+varImp(BigMac_rf_trained)$importance %>% arrange(desc(Overall)) %>% knitr::kable()
+
+# And next for **GLM**:
+
+# Importance of variables: Generalized Linear Model (GLM)
+varImp(BigMac_glm_trained)$importance %>% arrange(desc(Overall)) %>% knitr::kable()
+
+# As one can observe, in both models the most important variable is **CNY_adjusted**. Variables such as **adj_price** and **GDP_bigmac** are important in the *GLM* model but not in *RF*. On the other hand, **JPY_adjusted** is important in *RF* but not in *GLM*. Finally, both models show similar values of importance for **EUR_adjusted** and **GBP_adjusted**.
+
+# 4. Conclusions
+
+# As we mentioned in the introduction, the Big Mac Index is an interesting approach to currency valuation when taking into account the purchasing power of local currencies. In this project, we have widened our scope including the valuation of some of the most important international currencies (other than the US dollar), such as the euro, the yen, the yuan and the British pound. By doing so, we have shown models in which we can predict when the currency of a country is a good opportunity for investors who operate in US dollars. Also, in our models we have used adjusted values, in order to avoid the effect of higher nominal prices (especially for non-traded goods) in richer countries.
+
+# We have used four different models, two of which have turned out to be the most accurate (*RF* and *GLM*), with similar results. Regarding the variables, both models show a strong importance of the valuation of the Chinese yuan and moderate importance of the euro and the British pound. These results can lead us to some relevant conclusions.
+
+# Firstly, once the distorsion of nominal prices is discounted by using adjusted variables, we see that there is no clear correlation between a country's wealth (measured by GDP per capita) and its overvaluation regarding US dollars. Therefore, according to this study there is no evidence that there are less investment opportunities in the currencies of richer countries. In a way, this conclusion can be backed-up by the fact that these countries have traditionally been a good destination for investors, especially when interest rates are high. Thus, the popular idea that emerging markets always offer better opportunities in terms of currency undervaluation is not supported by these results.
+
+# Secondly, we have also observed that when using adjusted values, nominal prices do not play a clear role in currency valuations. In economic terms, this means that purchasing power should be approached taking more into account real prices, which involve additional factors such as wages. In investment terms, this means that opportunities might not necessarily arise when there is deflation.
+
+# In addition, we see a strong correlation between how a local currency is valued regarding US dollars and how that same currency is valued regarding Chinese yuan. This fact can tell us a lot about how strong economic relations between the US and China are. But also, it might be an indicator of how monetary policy in China has been successful when trying to achieve a stable valuation of the yuan against the dollar, not only taking into account nominal prices but also purchasing power.
+
+# Finally, we also see that the euro and British pound show moderate importance in the models. This fact is consistent with the monetary policy by the Bank of England and the European Central Bank, which usually tends to follow the steps of the US Federal Reserve, especially when it comes to interest rates. However, it is clear that there is not a strong correlation between the variables in this model, which is also proven by how investment and trade flows between Europe and the US have changed between 2001 and 2022.
+
+# In conclusion, our analysis has shown that the Big Mac Index can be a useful instrument for economic research in the field of foreign investment, but also in monetary policy. In order to deepen into the conclusions we have shown, further research should be done.
